@@ -10,6 +10,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^5.59.6",
+    "@typescript-eslint/parser": "^5.59.6",
+    "csv-parser": "^3.0.0",
+    "date-fns": "^2.30.0",
+    "typescript": "^5.0.4",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.2.1",
+    "ts-node": "^10.9.1"
   }
 }
