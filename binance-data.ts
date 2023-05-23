@@ -19,7 +19,7 @@ interface dataObjectType {
   };
 }
 
-const fileName = "2021-2022.csv";
+const fileName = "2022-2023.csv";
 
 const tradeSynonyms = [
   "Buy",
@@ -842,7 +842,7 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
     },
   ];
 
-  // fs.writeFileSync("./final-data.json", JSON.stringify(finalRawData));
+  fs.writeFileSync("./final-data.json", JSON.stringify(finalRawData));
   // console.log(finalRawData);
   console.log(`final raw data made successfully`);
   return finalRawData;
