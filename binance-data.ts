@@ -19,11 +19,7 @@ interface dataObjectType {
   };
 }
 
-// const fileName = "xlsx_source_copy.xlsx";
-// const fileName = "handle_aggregation.xlsx";
-// const fileName = "handle_aggregation.csv";
-const fileName = "2022-2023.csv";
-
+const fileName = "2021-2022.csv";
 
 const tradeSynonyms = [
   "Buy",
@@ -36,7 +32,14 @@ const tradeSynonyms = [
   "Transaction Sold",
 ];
 
+//! Excluding isolated margin transfers
+const transferSynonyms = [
+  "transfer_in",
+  "transfer_out",
+  "Transfer Between Spot Account and UM Futures Account",
+];
 function parseFileData(path) {
+  console.log(`parsing file data`);
   const workbook = xlsx.readFile(path);
   const sheet_name_list = workbook.SheetNames;
   const docs: any[] = [];
@@ -50,22 +53,37 @@ function parseFileData(path) {
 
 // MAIN SCRIPT STARTS FROM HERE :
 
-function xlsxDateTypeConvertor(xlsxDate) {
+function xlsxDateTypeConvertor(xlsxDate, extension: string) {
   // Convert the float value to a JavaScript Date object
-  const date = new Date((xlsxDate - 25569) * 86400 * 1000 - 10000); //minus 10 secs only for csv
+  let date;
+  if (extension === "xlsx") date = new Date((xlsxDate - 25569) * 86400 * 1000);
+  else {
+    let num = (xlsxDate - 25569) * 86400 * 1000 - 10000; //minus 10 secs only for csv
+    if (num % 1000 !== 0) num = Math.ceil((num / 1000) * 1000);
+    date = new Date(num);
+  }
 
-  // Format the date to a string in the YYYY-MM-DD format
-  const formattedDate = date.getTime();
+  //for csv, date format in the file should be => YYYY-MM-DD hh:mm:ss
+
+  //getting unix timestamp
+  let formattedDate = date.getTime();
+
+  if (formattedDate % 10 !== 0) formattedDate -= 1; //for csv
 
   return formattedDate.toString();
 }
 
 function getCsvData() {
   console.log(`making data format from csv data object`);
+  const fileExtension = fileName.split(".").pop();
+  console.log({ fileExtension });
   let csvData: dataObjectType[] = [];
   const workbook = parseFileData(fileName);
-  fs.writeFileSync("./raw-data.json", JSON.stringify(workbook[0].data));
+
+  // fs.writeFileSync("./raw-data.json", JSON.stringify(workbook[0].data));
   console.log("csv length", workbook[0].data.length);
+
+  //getting data for each row of each worksheet
   workbook.forEach((sheet) => {
     sheet.data.forEach((row) => {
       let dataObject: dataObjectType = {
@@ -79,30 +97,31 @@ function getCsvData() {
       //! IGNORING SMALL ASSETS BNB EXCHNAGE TXNS
       if (dataObject.operation === "Small assets exchange BNB") return;
 
-      dataObject.timestamp = xlsxDateTypeConvertor(row.UTC_Time);
+      //converting date into timstamp
+      dataObject.timestamp = xlsxDateTypeConvertor(row.UTC_Time, fileExtension);
       dataObject.account = row.Account;
       dataObject.operation = row.Operation;
       if (row.Operation == "Fee") {
         dataObject.fee = {
           symbol: row.Coin,
-          quantity: row.Change,
+          quantity: Math.abs(row.Change),
         };
       } else if (row.Change > 0) {
         dataObject.incoming = {
           symbol: row.Coin,
-          quantity: row.Change,
+          quantity: Math.abs(row.Change),
         };
       } else {
         dataObject.outgoing = {
           symbol: row.Coin,
-          quantity: row.Change,
+          quantity: Math.abs(row.Change), //absolute value
         };
       }
       csvData.push(dataObject);
     });
   });
 
-  fs.writeFileSync("./csvDataDump.json", JSON.stringify(csvData));
+  // fs.writeFileSync("./csvDataDump.json", JSON.stringify(csvData));
 
   return csvData;
 }
@@ -124,120 +143,12 @@ function mapCsvData(csvData: dataObjectType[]) {
     }
   });
 
-  // csvData.forEach((data) => {
-  //   const timestamp = data.time;
-  //   delete data.time;
-  //   //if data already exists for the same timestamp
-  //   if (mappedData.has(timestamp)) {
-  //     console.log("same timestamp");
-  //     const existingData = mappedData.get(timestamp);
-  //     console.log("existing data operation", existingData.operation);
-  //     console.log("data operation", data.operation);
+  //writing map to json file
+  // var obj = Object.fromEntries(mappedData);
+  // var jsonString = JSON.stringify(obj);
 
-  //     // if(data.operation === "Fee") {
-  //     //   mappedData.set(timestamp, {
-  //     //     ...existingData,
-  //     //     fee: {
-  //     //       symbol: data.fee.symbol,
-  //     //       quantity: existingData?.fee?.quantity ?? 0 + data.fee.quantity,
-  //     //     }
-  //     //   })
-  //     // }
+  // fs.writeFileSync("./mapped-data.json", jsonString);
 
-  //     if (
-  //       existingData.operation === data.operation ||
-  //       (existingData.operation === "Trade" &&
-  //         tradeSynonyms.includes(data.operation))
-  //     ) {
-  //       // if operation and timestamp is same => aggregate
-  //       console.log("same operation");
-
-  //       if ( data?.incoming) {
-  //         mappedData.set(timestamp, {
-  //           ...existingData,
-  //           ...data,
-  //           incoming: {
-  //             symbol: data.incoming.symbol,
-  //             quantity: data.incoming.quantity + existingData?.incoming?.quantity ?? 0,
-  //           },
-  //         });
-  //         console.log('added', mappedData);
-  //         console.log('data quan', data.incoming.quantity);
-  //         console.log('existing data quan', existingData.incoming.quantity);
-  //         console.log('added quan', data.incoming.quantity + existingData.incoming.quantity);
-  //       }
-  //       if (data?.outgoing) {
-  //         mappedData.set(timestamp, {
-  //           ...existingData,
-  //           ...data,
-  //           outgoing: {
-  //             symbol: data.outgoing.symbol,
-  //             quantity: data.outgoing.quantity + existingData?.outgoing?.quantity ?? 0,
-  //           },
-  //         });
-  //       }
-  //       if (existingData?.fee && data?.fee) {
-  //         mappedData.set(timestamp, {
-  //           ...existingData,
-  //           ...data,
-  //           fee: {
-  //             symbol: data.fee.symbol,
-  //             quantity: data.fee.quantity + existingData.fee.quantity,
-  //           },
-  //         });
-  //       }
-  //     } else {
-  //     switch (existingData.operation) {
-  //       case "Realize profit and loss":
-  //         {
-  //           if (data.operation === "Realize profit and loss") {
-  //           }
-  //         }
-  //         break;
-  //       case "Fee":
-  //         {
-  //           mappedData.set(timestamp, {
-  //             ...existingData,
-  //             ...data,
-  //             operation: tradeSynonyms.includes(data.operation)
-  //               ? "Trade"
-  //               : data.operation,
-  //           });
-  //         }
-  //         break;
-  //       default:
-  //         {
-  //           mappedData.set(timestamp, {
-  //             ...data,
-  //             ...existingData,
-  //             operation: tradeSynonyms.includes(existingData.operation)
-  //               ? "Trade"
-  //               : existingData.operation,
-  //           });
-  //         }
-  //         break;
-  //     }
-  //     }
-  //     // if (existingData.operation === "Fee") {
-
-  //     // } else {
-
-  //     // }
-  //     // if (existingData.operation === "Buy") existingData.operation = "Trade";
-  //   } else {
-  //     mappedData.set(timestamp, {
-  //       ...data,
-  //       operation: tradeSynonyms.includes(data.operation)
-  //         ? "Trade"
-  //         : data.operation,
-  //     });
-  //   }
-  // });
-
-  var obj = Object.fromEntries(mappedData);
-  var jsonString = JSON.stringify(obj);
-
-  fs.writeFileSync("./mapped-data.json", jsonString);
   return mappedData;
 }
 
@@ -259,36 +170,18 @@ interface newMapType {
   };
 }
 //function to merge transactions based on similar timestamp and operations
-
 function mergeTransactions(mappedData: Map<string, any[]>) {
+  console.log(`merging common transactions per timestamp`);
   const newMap = new Map<string, any[]>();
-  console.log("merging transactions");
 
   //loop through each array of each timestamp
   for (const [key, value] of mappedData) {
     const array: newMapType[] = [];
-    let isTrade = false;
-    // let finalObject: dataObjectType;
-    // let operation: string = "";
     value.forEach((dataObject) => {
-      // console.log("final object", finalObject);
-      console.log("data object", dataObject);
+      // console.log("data object", dataObject);
       switch (dataObject.operation) {
         case "Fee":
           {
-            // finalObject = {
-            //   ...finalObject,
-            //   account: dataObject.account,
-            //   operation: operation === "" ? "Fee" : operation,
-            //   time: key,
-            //   fee: {
-            //     symbol: dataObject.fee.symbol,
-            //     quantity:
-            //       dataObject.fee.quantity + (finalObject?.fee?.quantity ?? 0),
-            //   },
-            // };
-            // if (operation === "") operation = "Fee";
-
             //look in the array if Fee operation is there with same symbol
             let result = array.findIndex(
               (obj) =>
@@ -331,24 +224,7 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
             operation = dataObject.operation;
           }
 
-          isTrade = operation === "Trade";
-
-          // console.log("operation variable", operation);
-
           if (dataObject?.incoming) {
-            //match found = add to array
-            // console.log("incoming present");
-            // console.log("dataobject qty", dataObject.incoming.quantity);
-            // console.log(
-            //   "finalobject qty",
-            //   finalObject?.incoming?.quantity ?? 0
-            // );
-            // console.log(
-            //   "adding both",
-            //   dataObject.incoming.quantity +
-            //     (finalObject?.incoming?.quantity ?? 0)
-            // );
-
             let result = array.findIndex(
               (obj) => obj?.incoming?.symbol === dataObject.incoming.symbol
             );
@@ -380,32 +256,7 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
                 operation: operation, //because operation can be changed, like becoming Trade
               });
             }
-
-            // finalObject = {
-            //   ...finalObject,
-            //   account: dataObject.account,
-            //   operation: operation,
-            //   incoming: {
-            //     symbol: dataObject.incoming.symbol,
-            //     quantity:
-            //       dataObject.incoming.quantity +
-            //       (finalObject?.incoming?.quantity ?? 0),
-            //   },
-            // };
-            // console.log("final object appended", finalObject);
           } else if (dataObject?.outgoing) {
-            // console.log("incoming present");
-            // finalObject = {
-            //   ...finalObject,
-            //   account: dataObject.account,
-            //   operation: operation,
-            //   outgoing: {
-            //     symbol: dataObject.outgoing.symbol,
-            //     quantity:
-            //       dataObject.outgoing.quantity +
-            //       (finalObject?.outgoing?.quantity ?? 0),
-            //   },
-            // };
             let result = array.findIndex(
               (obj) => obj?.outgoing?.symbol === dataObject.outgoing.symbol
             );
@@ -442,26 +293,49 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
         }
       }
     });
-    //if operatoin is Trade, merge incoming, outgoing, fee
+    //if operation is Trade, merge incoming, outgoing, fee
     const incomingArray = [];
     const outgoingArray = [];
     const feeArray = [];
+
+    //populating three arrays for each timestamp
     array.forEach((obj) => {
       if (obj?.incoming) incomingArray.push(obj);
       else if (obj?.outgoing) outgoingArray.push(obj);
       else feeArray.push(obj);
     });
-    console.log("arrays", incomingArray, feeArray, outgoingArray);
 
+    //pointer indices for arrays
     let i = 0,
       j = 0,
       k = 0;
+
+    //array lengths
     const inLen = incomingArray.length;
     const outLen = outgoingArray.length;
     const feeLen = feeArray.length;
+
+    //populating new Array to be inserted in newMap
     let newArray = [];
+
     //merging incoming, outgoing, fee
     while (i < inLen || j < outLen || k < feeLen) {
+      //! Handling transfer_in, transfer_out, similar
+      if (i < inLen && transferSynonyms.includes(incomingArray[i].operation)) {
+        newArray.push(incomingArray[i]);
+        i++;
+        continue;
+        //! Handling transfer_in, transfer_out, similar
+      } else if (
+        j < outLen &&
+        transferSynonyms.includes(outgoingArray[j].operation)
+      ) {
+        newArray.push(outgoingArray[j]);
+        j++;
+        continue;
+      }
+
+      //merge 3 types into one object
       let obj = {};
       let operation = "";
       if (i < inLen) {
@@ -470,19 +344,15 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
           ...incomingArray[i],
         };
         operation = incomingArray[i].operation;
-        i++;
+        i++; //increment pointer
       }
       if (j < outLen) {
-        // if (!operation || outgoingArray[j].operation === operation) {
         obj = {
           ...obj,
           ...outgoingArray[j],
         };
-        // } else {
-
-        // }
         operation = outgoingArray[j].operation;
-        j++;
+        j++; //increment pointer
       }
       if (k < feeLen) {
         obj = {
@@ -490,16 +360,19 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
           ...feeArray[k],
           operation,
         };
-        k++;
+        k++; //increment pointer
       }
+      //add the object into the array
       newArray.push(obj);
     }
-    // newMap.set(key, finalObject);
+    //add the array into the newMap
     newMap.set(key, newArray);
   }
-  const obj = Object.fromEntries(newMap);
-  fs.writeFileSync("./new-map.json", JSON.stringify(obj));
-  console.log("new map data", newMap);
+
+  //writing to file
+  // const obj = Object.fromEntries(newMap);
+  // fs.writeFileSync("./new-map.json", JSON.stringify(obj));
+  // console.log("new map data", newMap);
   return newMap;
 }
 
@@ -542,14 +415,7 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
   let finalRawData = [];
 
   for (const [key, value] of newMap) {
-    // const data = {
-    //   timestamp: key,
-    // };
-    // console.log(value.operation);
-    console.log("value", value);
     value.forEach((obj) => {
-      console.log("obj", obj);
-      console.log("obj oreration", obj.operation);
       switch (obj.operation) {
         case "Realize profit and loss":
           {
@@ -976,17 +842,17 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
     },
   ];
 
-  fs.writeFileSync("./final-data.json", JSON.stringify(finalRawData));
-  console.log(finalRawData);
+  // fs.writeFileSync("./final-data.json", JSON.stringify(finalRawData));
+  // console.log(finalRawData);
+  console.log(`final raw data made successfully`);
+  return finalRawData;
 }
 
 function main() {
   const csvData = getCsvData();
   const mappedData = mapCsvData(csvData);
   const newMap = mergeTransactions(mappedData);
-  // console.log(mappedData);
   const finalRawData = makeFinalRawData(newMap);
-  // console.log(finalRawData);
 }
 
 main();
