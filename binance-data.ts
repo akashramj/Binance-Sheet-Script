@@ -20,11 +20,11 @@ interface dataObjectType {
 }
 
 const fileName = "2022-2023.csv";
+// const fileName = "vineet-sid-binance.csv";
 
 const tradeSynonyms = [
   "Buy",
   "Sell",
-  "Send",
   "Transaction Buy",
   "Transaction Spend",
   "Transaction Related",
@@ -387,6 +387,8 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
   const deposit = [];
   const withdraw = [];
 
+  const payment = [];
+
   const realizeProfitAndLoss = [];
   const fundingFee = [];
   const distribution = [];
@@ -515,15 +517,18 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
             });
           }
           break;
+
+        // * handle PAY transactions
         case "Send":
           {
-            trade.push({
+            payment.push({
               ...obj,
               timestamp: key,
-              operation: "Funding Fee",
+              operation: "Payment",
             });
           }
           break;
+
         // case "Transaction Spend": {
         //   trade.push({
         //     ...obj,
@@ -793,6 +798,10 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
       data: p2p,
     },
     {
+      name: "Payment",
+      data: payment,
+    },
+    {
       name: "Leverage Token Redemption",
       data: leverageTokenRedemption,
     },
@@ -842,7 +851,7 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
     },
   ];
 
-  fs.writeFileSync("./final-data.json", JSON.stringify(finalRawData));
+  fs.writeFileSync(`./final-data-${fileName.split('.')[0]}.json`, JSON.stringify(finalRawData));
   // console.log(finalRawData);
   console.log(`final raw data made successfully`);
   return finalRawData;
