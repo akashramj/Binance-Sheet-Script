@@ -20,6 +20,7 @@ interface dataObjectType {
 }
 
 const fileName = "2022-2023.csv";
+// const fileName = "all-3-combined.xlsx";
 // const fileName = "vineet-sid-binance.csv";
 
 const tradeSynonyms = [
@@ -169,6 +170,27 @@ interface newMapType {
     quantity: number;
   };
 }
+
+function getSpotRareTxns(mappedData: Map<string, any[]>) {
+  const newRareTxnsMap = new Map<string, any[]>()
+  for(const [key, value] of mappedData) {
+    let incomingAssets = new Set<string>(); //incoming asset count
+    for(const obj of value) {
+      if(obj?.incoming && obj?.account === "SPOT") {
+        incomingAssets.add(obj?.incoming.symbol);
+      }
+      if(incomingAssets.size > 1) {
+        newRareTxnsMap.set(key, value);
+        break;
+      }
+    }
+  }
+
+  let mapObject = Object.fromEntries(newRareTxnsMap);
+
+  fs.writeFileSync(`./rare-spot-txns-${fileName.split('.')[0]}.json`, JSON.stringify(mapObject));
+}
+
 //function to merge transactions based on similar timestamp and operations
 function mergeTransactions(mappedData: Map<string, any[]>) {
   console.log(`merging common transactions per timestamp`);
@@ -862,6 +884,7 @@ function main() {
   const mappedData = mapCsvData(csvData);
   const newMap = mergeTransactions(mappedData);
   const finalRawData = makeFinalRawData(newMap);
+  // getSpotRareTxns(mappedData);
 }
 
 main();
