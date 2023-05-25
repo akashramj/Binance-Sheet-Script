@@ -442,14 +442,12 @@ function handleLiquidSwapBuySell(
     //track the index of add/sell txn where timestamp is just less than the current buy txn
     let indexOfAddSellTxn: number;
 
-    //TODO: since the array is already sorted, we can use binary search - Optiimization
+    //TODO: since the array is already sorted, we can use binary search - Optimization
     for (let j = 0; j < liquidSwapAddSell.length; j++) {
       if (liquidSwapAddSell[j].timestamp <= buyTxn.timestamp) {
         //tracking index
         indexOfAddSellTxn = j;
       } else break; //if timestamp of add/sell exceeds that of buy, then stop
-
-      // if(liquidSwapAddSell[j].timestamp > buyTxn.timestamp) break;
     }
 
     //all add/sell txns are after buy txn
@@ -462,7 +460,6 @@ function handleLiquidSwapBuySell(
       buyTxn.timestamp - liquidSwapAddSell[indexOfAddSellTxn].timestamp <=
       10000
     ) {
-      console.log("ts less than 10 sec found");
       //add the whole thing as trade
       trade.push({
         ...liquidSwapAddSell[indexOfAddSellTxn],
@@ -485,6 +482,7 @@ function handleLiquidSwapBuySell(
   });
 }
 
+// * function for handling and merging leverage token txns upon conditions
 function handleLeverageTokenTxns(
   leverageTokenRedemption: any[],
   leverageTokenPurchase: any[]
@@ -495,14 +493,94 @@ function handleLeverageTokenTxns(
     console.warn(
       `No entry in leverage token redemption or leverage token purchase array, returning....`
     );
-    return;
+    return [[], []];
+  }
+
+  const newLeverageTokenRedemption = [];
+  const newLeverageTokenPurchase = [];
+
+  //looping leverage token redemption
+  for (let i = 0; i < leverageTokenRedemption.length; i++) {
+    const redemptionTxn = leverageTokenRedemption[i];
+
+    //if it contains both incoming or outgoing - skip
+    if (redemptionTxn?.incoming && redemptionTxn?.outgoing) {
+      newLeverageTokenRedemption.push(redemptionTxn);
+      continue;
+    }
+
+    //look for next txn => if found within 10sec and of opposite sign, merge into one - leverageTokenredemption[i+1] is the succeeding txn
+    if (
+      i + 1 < leverageTokenRedemption.length &&
+      leverageTokenRedemption[i + 1].timestamp - redemptionTxn.timestamp <=
+        10000
+    ) {
+      const nextTxn = leverageTokenRedemption[i + 1];
+      if (redemptionTxn?.incoming && nextTxn?.outgoing && !nextTxn?.incoming) {
+        //merge this and succeeding txn into one
+        newLeverageTokenRedemption.push({
+          ...redemptionTxn,
+          ...nextTxn,
+        });
+        i++;
+        continue;
+      } else if (
+        redemptionTxn?.outgoing &&
+        nextTxn?.incoming &&
+        !nextTxn?.outgoing
+      ) {
+        newLeverageTokenRedemption.push({
+          ...redemptionTxn,
+          ...nextTxn,
+        });
+        i++;
+        continue;
+      }
+    }
+    newLeverageTokenRedemption.push(redemptionTxn);
   }
 
   //looping leverage token purchase
-  leverageTokenPurchase.forEach((purchaseTxn, i) => {
+  for (let i = 0; i < leverageTokenPurchase.length; i++) {
+    const purchaseTxn = leverageTokenPurchase[i];
+
     //if it contains both incoming or outgoing - skip
-    if (purchaseTxn?.incoming && purchaseTxn?.outgoing) return;
-  });
+    if (purchaseTxn?.incoming && purchaseTxn?.outgoing) {
+      newLeverageTokenPurchase.push(purchaseTxn);
+      continue;
+    }
+
+    //look for next txn => if found within 10sec and of opposite sign, merge into one - leverageTokenPurchase[i+1] is the succeeding txn
+    if (
+      i + 1 < leverageTokenPurchase.length &&
+      leverageTokenPurchase[i + 1].timestamp - purchaseTxn.timestamp <= 10000
+    ) {
+      const nextTxn = leverageTokenPurchase[i + 1];
+      if (purchaseTxn?.incoming && nextTxn?.outgoing && !nextTxn?.incoming) {
+        //merge this and succeeding txn into one
+        newLeverageTokenPurchase.push({
+          ...purchaseTxn,
+          ...nextTxn,
+        });
+        i++;
+        continue;
+      } else if (
+        purchaseTxn?.outgoing &&
+        nextTxn?.incoming &&
+        !nextTxn?.outgoing
+      ) {
+        newLeverageTokenPurchase.push({
+          ...purchaseTxn,
+          ...nextTxn,
+        });
+        i++;
+        continue;
+      }
+    }
+    newLeverageTokenPurchase.push(purchaseTxn);
+  }
+
+  return [newLeverageTokenRedemption, newLeverageTokenPurchase];
 }
 
 function makeFinalRawData(newMap: Map<string, any[]>) {
@@ -898,6 +976,10 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
     });
   }
 
+  //handling leverage token txns
+  const [newLeverageTokenRedemption, newLeverageTokenPurchase] =
+    handleLeverageTokenTxns(leverageTokenRedemption, leverageTokenPurchase);
+
   finalRawData = [
     {
       name: "Transfer",
@@ -945,15 +1027,15 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
     },
     {
       name: "Leverage Token Redemption",
-      data: leverageTokenRedemption,
+      data: newLeverageTokenRedemption,
+    },
+    {
+      name: "Leverage Token Purchase",
+      data: newLeverageTokenPurchase,
     },
     {
       name: "Cash Voucher Distribution",
       data: cashVoucherDistribution,
-    },
-    {
-      name: "Leverage Token Purchase",
-      data: leverageTokenPurchase,
     },
     {
       name: "Liquid Swap add/sell",
@@ -1010,14 +1092,30 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
 }
 
 function main() {
+
+  console.time('Total Time');
+
+  console.time('Get Csv Data');
   const csvData = getCsvData();
+  console.timeEnd('Get Csv Data');
+
+  console.time('Map Csv Data');
   const mappedData = mapCsvData(csvData);
+  console.timeEnd('Map Csv Data');
+
+  console.time('Merge Txns');
   const newMap = mergeTransactions(mappedData);
+  console.timeEnd('Merge Txns');
+
+  console.time('Make Final Raw Data');
   const finalRawData = makeFinalRawData(newMap);
+  console.timeEnd('Make Final Raw Data');
   // getSpotRareTxns(mappedData);
 
+  console.timeEnd('Total Time');
+
   fs.writeFileSync(
-    `./final-data-${fileName.split(".")[0]}-new.json`,
+    `./final-data-${fileName.split(".")[0]}.json`,
     JSON.stringify(finalRawData)
   );
 
