@@ -39,6 +39,7 @@ const transferSynonyms = [
   "transfer_out",
   "Transfer Between Spot Account and UM Futures Account",
 ];
+
 function parseFileData(path) {
   console.log(`parsing file data`);
   const workbook = xlsx.readFile(path);
@@ -98,7 +99,7 @@ function getCsvData() {
       //! IGNORING SMALL ASSETS BNB EXCHNAGE TXNS
       if (dataObject.operation === "Small assets exchange BNB") return;
 
-      //converting date into timstamp
+      //converting date into timestamp
       dataObject.timestamp = xlsxDateTypeConvertor(row.UTC_Time, fileExtension);
       dataObject.account = row.Account;
       dataObject.operation = row.Operation;
@@ -172,14 +173,14 @@ interface newMapType {
 }
 
 function getSpotRareTxns(mappedData: Map<string, any[]>) {
-  const newRareTxnsMap = new Map<string, any[]>()
-  for(const [key, value] of mappedData) {
+  const newRareTxnsMap = new Map<string, any[]>();
+  for (const [key, value] of mappedData) {
     let incomingAssets = new Set<string>(); //incoming asset count
-    for(const obj of value) {
-      if(obj?.incoming && obj?.account === "SPOT") {
+    for (const obj of value) {
+      if (obj?.incoming && obj?.account === "SPOT") {
         incomingAssets.add(obj?.incoming.symbol);
       }
-      if(incomingAssets.size > 1) {
+      if (incomingAssets.size > 1) {
         newRareTxnsMap.set(key, value);
         break;
       }
@@ -188,7 +189,10 @@ function getSpotRareTxns(mappedData: Map<string, any[]>) {
 
   let mapObject = Object.fromEntries(newRareTxnsMap);
 
-  fs.writeFileSync(`./rare-spot-txns-${fileName.split('.')[0]}.json`, JSON.stringify(mapObject));
+  fs.writeFileSync(
+    `./rare-spot-txns-${fileName.split(".")[0]}.json`,
+    JSON.stringify(mapObject)
+  );
 }
 
 //function to merge transactions based on similar timestamp and operations
@@ -398,16 +402,85 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
   return newMap;
 }
 
+function handleLiquidSwapBuySell(finalRawData: any[], trade: any[], liquidSwapAddSell: any[], liquidSwapBuy: any[]) {
+  console.log(`Handling Liquid swap buy and sell txns`);
+
+  if (!liquidSwapBuy.length || !liquidSwapAddSell.length) {
+    console.warn(
+      `No entry in liquid swap add/sell or buy array, returning....`
+    );
+    return;
+  }
+
+  //find indices for liquid swap add/sell and liquid swap buy in finalRawData Array
+  const addSellIndex = finalRawData.findIndex(
+    (object) => object.name === "Liquid Swap add/sell"
+  );
+  const buyIndex = finalRawData.findIndex(
+    (object) => object.name === "Liquid Swap buy"
+  );
+
+  if (!addSellIndex || !buyIndex) {
+    console.error(
+      `Liquid Swap addSell or Buy entry not found in the finalRawData array, returing...`
+    );
+  }
+
+  //loop through buy, then loop through add/sell
+  liquidSwapBuy.forEach((buyTxn, i) => {
+    //track the index of add/sell txn where timestamp is just less than the current buy txn
+    let indexOfAddSellTxn: number;
+
+    //TODO: since the array is already sorted, we can use binary search - Optiimization
+    for (let j = 0; j < liquidSwapAddSell.length; j++) {
+      if (liquidSwapAddSell[j].timestamp <= buyTxn.timestamp) {
+        //tracking index
+        indexOfAddSellTxn = j;
+      } else break; //if timestamp of add/sell exceeds that of buy, then stop
+
+      // if(liquidSwapAddSell[j].timestamp > buyTxn.timestamp) break;
+    }
+
+    //all add/sell txns are after buy txn
+    if (!indexOfAddSellTxn) {
+      return;
+    }
+
+    console.log(
+      "buy ts - addsell ts",
+      buyTxn.timestamp - liquidSwapAddSell[indexOfAddSellTxn].timestamp
+    );
+    //check if the timestamp of add/sell is within 10 sec of buy txn
+    if (
+      buyTxn.timestamp - liquidSwapAddSell[indexOfAddSellTxn].timestamp <=
+      10000
+    ) {
+      console.log("ts less than 10 sec found");
+      //add the whole thing as trade
+      trade.push({
+        ...liquidSwapAddSell[indexOfAddSellTxn],
+        ...buyTxn,
+        operation: "Trade",
+      });
+      //delete the two txns from finalRawData
+      delete finalRawData[addSellIndex].data[indexOfAddSellTxn];
+      delete finalRawData[buyIndex].data[i];
+    }
+  });
+}
+
 function makeFinalRawData(newMap: Map<string, any[]>) {
   console.log(`making final raw data`);
 
   // const thirdPartyWalletTransfer = [];
   const transfer = []; //includes transfer_in and transfer_out, transfer keyword in any case
-  const trade = []; // check tradeSynonyms array
   const p2p = [];
 
   const deposit = [];
   const withdraw = [];
+
+  //trade
+  const trade = []; // check tradeSynonyms array
 
   const payment = [];
 
@@ -425,14 +498,15 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
   const leverageTokenRedemption = [];
   const leverageTokenPurchase = [];
 
+  const posSavingsPurchase = [];
+  const posSavingsInterest = [];
+  const posSavingsRedemption = [];
+
+  //liquid swap data
   const liquidSwapAddSell = [];
   const liquidSwapRewards = [];
   const liquidSwapRemove = [];
   const liquidSwapBuy = [];
-
-  const posSavingsPurchase = [];
-  const posSavingsInterest = [];
-  const posSavingsRedemption = [];
 
   //TODO: need to handle transfers
 
@@ -706,6 +780,14 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
             });
           }
           break;
+        case "Liquid Swap buy":
+          {
+            liquidSwapBuy.push({
+              ...obj,
+              timestamp: key,
+            });
+          }
+          break;
         case "Liquid Swap rewards":
           {
             liquidSwapRewards.push({
@@ -757,14 +839,6 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
         case "Large OTC trading":
           {
             largeOtcTrading.push({
-              ...obj,
-              timestamp: key,
-            });
-          }
-          break;
-        case "Liquid Swap buy":
-          {
-            liquidSwapBuy.push({
               ...obj,
               timestamp: key,
             });
@@ -840,6 +914,10 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
       data: liquidSwapAddSell,
     },
     {
+      name: "Liquid Swap buy",
+      data: liquidSwapBuy,
+    },
+    {
       name: "Liquid Swap rewards",
       data: liquidSwapRewards,
     },
@@ -867,14 +945,11 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
       name: "Large OTC trading",
       data: largeOtcTrading,
     },
-    {
-      name: "Liquid Swap buy",
-      data: liquidSwapBuy,
-    },
   ];
 
-  fs.writeFileSync(`./final-data-${fileName.split('.')[0]}.json`, JSON.stringify(finalRawData));
-  // console.log(finalRawData);
+  //handle liquid swap add/sell and liquid swap buy txns
+  handleLiquidSwapBuySell(finalRawData, trade, liquidSwapAddSell, liquidSwapBuy);
+
   console.log(`final raw data made successfully`);
   return finalRawData;
 }
@@ -885,6 +960,13 @@ function main() {
   const newMap = mergeTransactions(mappedData);
   const finalRawData = makeFinalRawData(newMap);
   // getSpotRareTxns(mappedData);
+
+  fs.writeFileSync(
+    `./final-data-${fileName.split(".")[0]}-new.json`,
+    JSON.stringify(finalRawData)
+  );
+
+  console.log("process completed");
 }
 
 main();
