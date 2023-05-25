@@ -19,7 +19,7 @@ interface dataObjectType {
   };
 }
 
-const fileName = "2022-2023.csv";
+const fileName = "2020-2021.csv";
 // const fileName = "all-3-combined.xlsx";
 // const fileName = "vineet-sid-binance.csv";
 
@@ -96,8 +96,7 @@ function getCsvData() {
       //! IGNORING ISOLATED MARGIN TXNS
       if (dataObject.account === "IsolatedMargin") return;
 
-      //! IGNORING SMALL ASSETS BNB EXCHNAGE TXNS
-      if (dataObject.operation === "Small assets exchange BNB") return;
+      // if (dataObject.operation === "Small assets exchange BNB") return;
 
       //converting date into timestamp
       dataObject.timestamp = xlsxDateTypeConvertor(row.UTC_Time, fileExtension);
@@ -319,13 +318,23 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
         }
       }
     });
+
+    //MERGING INCOMING, OUTGOING, FEE
     //if operation is Trade, merge incoming, outgoing, fee
     const incomingArray = [];
     const outgoingArray = [];
     const feeArray = [];
 
+    //populating new Array to be inserted in newMap
+    let newArray = [];
+
     //populating three arrays for each timestamp
     array.forEach((obj) => {
+      if (obj.operation === "Small Assets Exchange BNB") {
+        newArray.push(obj);
+        return;
+      }
+
       if (obj?.incoming) incomingArray.push(obj);
       else if (obj?.outgoing) outgoingArray.push(obj);
       else feeArray.push(obj);
@@ -340,9 +349,6 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
     const inLen = incomingArray.length;
     const outLen = outgoingArray.length;
     const feeLen = feeArray.length;
-
-    //populating new Array to be inserted in newMap
-    let newArray = [];
 
     //merging incoming, outgoing, fee
     while (i < inLen || j < outLen || k < feeLen) {
@@ -402,7 +408,12 @@ function mergeTransactions(mappedData: Map<string, any[]>) {
   return newMap;
 }
 
-function handleLiquidSwapBuySell(finalRawData: any[], trade: any[], liquidSwapAddSell: any[], liquidSwapBuy: any[]) {
+function handleLiquidSwapBuySell(
+  finalRawData: any[],
+  trade: any[],
+  liquidSwapAddSell: any[],
+  liquidSwapBuy: any[]
+) {
   console.log(`Handling Liquid swap buy and sell txns`);
 
   if (!liquidSwapBuy.length || !liquidSwapAddSell.length) {
@@ -422,7 +433,7 @@ function handleLiquidSwapBuySell(finalRawData: any[], trade: any[], liquidSwapAd
 
   if (!addSellIndex || !buyIndex) {
     console.error(
-      `Liquid Swap addSell or Buy entry not found in the finalRawData array, returing...`
+      `Liquid Swap addSell or Buy entry not found in the finalRawData array, returning...`
     );
   }
 
@@ -446,10 +457,6 @@ function handleLiquidSwapBuySell(finalRawData: any[], trade: any[], liquidSwapAd
       return;
     }
 
-    console.log(
-      "buy ts - addsell ts",
-      buyTxn.timestamp - liquidSwapAddSell[indexOfAddSellTxn].timestamp
-    );
     //check if the timestamp of add/sell is within 10 sec of buy txn
     if (
       buyTxn.timestamp - liquidSwapAddSell[indexOfAddSellTxn].timestamp <=
@@ -462,10 +469,39 @@ function handleLiquidSwapBuySell(finalRawData: any[], trade: any[], liquidSwapAd
         ...buyTxn,
         operation: "Trade",
       });
-      //delete the two txns from finalRawData
-      delete finalRawData[addSellIndex].data[indexOfAddSellTxn];
-      delete finalRawData[buyIndex].data[i];
+
+      //delete add/sell txn from finalRawData
+      let deleteIndex = finalRawData[addSellIndex].data.findIndex(
+        (obj) => obj === finalRawData[addSellIndex].data[indexOfAddSellTxn]
+      );
+      delete finalRawData[addSellIndex].data[deleteIndex];
+
+      //delete buy txn from finalRawData
+      deleteIndex = finalRawData[buyIndex].data.findIndex(
+        (obj) => obj === finalRawData[buyIndex].data[i]
+      );
+      delete finalRawData[buyIndex].data[deleteIndex];
     }
+  });
+}
+
+function handleLeverageTokenTxns(
+  leverageTokenRedemption: any[],
+  leverageTokenPurchase: any[]
+) {
+  console.log(`Handling leverage token redemption and purchase txns`);
+
+  if (!leverageTokenRedemption.length || !leverageTokenPurchase.length) {
+    console.warn(
+      `No entry in leverage token redemption or leverage token purchase array, returning....`
+    );
+    return;
+  }
+
+  //looping leverage token purchase
+  leverageTokenPurchase.forEach((purchaseTxn, i) => {
+    //if it contains both incoming or outgoing - skip
+    if (purchaseTxn?.incoming && purchaseTxn?.outgoing) return;
   });
 }
 
@@ -507,6 +543,8 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
   const liquidSwapRewards = [];
   const liquidSwapRemove = [];
   const liquidSwapBuy = [];
+
+  const smallAssetsExchangeBNB = [];
 
   //TODO: need to handle transfers
 
@@ -844,9 +882,17 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
             });
           }
           break;
-        default:
+        case "Small Assets Exchange BNB":
           {
+            {
+              smallAssetsExchangeBNB.push({
+                ...obj,
+                timestamp: key,
+              });
+            }
           }
+          break;
+        default:
           break;
       }
     });
@@ -945,10 +991,19 @@ function makeFinalRawData(newMap: Map<string, any[]>) {
       name: "Large OTC trading",
       data: largeOtcTrading,
     },
+    {
+      name: "Small Assets Exchange BNB",
+      data: smallAssetsExchangeBNB,
+    },
   ];
 
   //handle liquid swap add/sell and liquid swap buy txns
-  handleLiquidSwapBuySell(finalRawData, trade, liquidSwapAddSell, liquidSwapBuy);
+  handleLiquidSwapBuySell(
+    finalRawData,
+    trade,
+    liquidSwapAddSell,
+    liquidSwapBuy
+  );
 
   console.log(`final raw data made successfully`);
   return finalRawData;
